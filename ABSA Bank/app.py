@@ -416,7 +416,7 @@ def parse_pdf_enhanced(file):
             for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
-                    text += page_text + '\n'
+                    text += page_text
         return text
     except Exception as e:
         st.error(f"Error parsing PDF: {str(e)}")
@@ -426,40 +426,26 @@ def process_text_to_df_enhanced(text):
     """Enhanced text processing with better pattern recognition"""
     transactions = []
 
-    # Multiple transaction patterns for different formats
-    patterns = [
-        # Pattern 1: Standard ABSA format
-        re.compile(r'(\d{4}-\d{2}-\d{2})\s+(.+?)\s+(-?R?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(-?R?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)'),
-        # Pattern 2: Alternative date format
-        re.compile(r'(\d{2}/\d{2}/\d{4})\s+(.+?)\s+(-?R?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(-?R?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)'),
-        # Pattern 3: No currency symbol
-        re.compile(r'(\d{4}-\d{2}-\d{2})\s+(.+?)\s+(-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(-?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)')
-    ]
+    # Use the exact working pattern from app_original.py as primary
+    transaction_pattern = re.compile(r'(\d{4}-\d{2}-\d{2})\s+(.+?)\s+(-?R?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s+(-?R?\d{1,3}(?:,\d{3})*(?:\.\d{2})?)')
 
     for line in text.split('\n'):
         line = line.strip()
         if not line:
             continue
 
-        for pattern in patterns:
-            match = pattern.search(line)
-            if match:
-                try:
-                    date_str, description, amount_str, balance_str = match.groups()
+        match = transaction_pattern.search(line)
+        if match:
+            try:
+                date_str, description, amount_str, balance_str = match.groups()
 
-                    # Convert date format if needed
-                    if '/' in date_str:
-                        date_obj = datetime.strptime(date_str, '%d/%m/%Y')
-                        date_str = date_obj.strftime('%Y-%m-%d')
+                # Clean and convert amounts (same logic as app_original.py)
+                amount = float(amount_str.replace(',', '').replace('R', '').replace(' ', ''))
+                balance = float(balance_str.replace(',', '').replace('R', '').replace(' ', ''))
 
-                    # Clean and convert amounts
-                    amount = float(re.sub(r'[R,\s]', '', amount_str))
-                    balance = float(re.sub(r'[R,\s]', '', balance_str))
-
-                    transactions.append([date_str, description.strip(), amount, balance])
-                    break
-                except (ValueError, AttributeError):
-                    continue
+                transactions.append([date_str, description.strip(), amount, balance])
+            except (ValueError, AttributeError):
+                continue
 
     if not transactions:
         return pd.DataFrame(columns=['Date', 'Description', 'Amount', 'Balance'])
