@@ -48,8 +48,25 @@ class DatabaseManager:
 
     def init_database(self):
         """Initialize database tables"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Test database integrity first
+            cursor.execute("PRAGMA integrity_check;")
+            integrity_result = cursor.fetchone()
+
+            if integrity_result[0] != "ok":
+                conn.close()
+                raise sqlite3.DatabaseError("Database integrity check failed")
+
+        except sqlite3.DatabaseError as e:
+            # Handle corrupted database by removing it and creating fresh
+            import os
+            if os.path.exists(self.db_path):
+                os.remove(self.db_path)
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
 
         # User profiles table
         cursor.execute('''

@@ -33,7 +33,7 @@ streamlit-authenticator==0.2.3
 plotly-express==0.4.1
 
 # Database Support
-sqlite3
+# sqlite3 is built into Python
 
 # Financial Data APIs (optional)
 yfinance==0.2.18
