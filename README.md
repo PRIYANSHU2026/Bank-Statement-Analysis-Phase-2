@@ -1,5 +1,6 @@
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/854a9d7a-8b4c-48d2-98e9-dc55a956fd50/4dd77614-fa41-4e0c-bd49-f0af44521598_removalai_preview" alt="Centered Image" width="600">
+  <"![4dd77614-fa41-4e0c-bd49-f0af44521598_removalai_preview](https://github.com/user-attachments/assets/9d677876-c4d8-448e-99f6-a75da09b6d25)" width="600">
+
 </p>
 
 
