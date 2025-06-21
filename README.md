@@ -181,12 +181,11 @@ The repository follows a clean, organized structure to support modularity and ea
 > 📌 **Figure Placeholder**:
 - <img width="780" alt="image" src="https://github.com/user-attachments/assets/210531cf-f36d-47e5-be7e-2646193b3f46" />
 - <img width="1056" alt="image" src="https://github.com/user-attachments/assets/629ead11-a248-4a9b-b80d-e9fd5e2ebfc7" />
-- *Figure 2. Login & File Upload Interface *
 - <img width="767" alt="image" src="https://github.com/user-attachments/assets/1acd406e-1e83-415f-972e-ad53c1d60fbb" />
+- <img width="718" alt="image" src="https://github.com/user-attachments/assets/3d73da24-eb0c-4105-bea2-4e0708065e00" />
+- <img width="1116" alt="image" src="https://github.com/user-attachments/assets/70e5c530-74ba-4c06-ab2f-570acc91c6bd" />
 
 
-- `dashboard_preview.png`: Add screenshot of interactive dashboard
-- `fhs_distribution.png`: Add histogram/bar chart showing FHS distribution across users
 
 ---
 
