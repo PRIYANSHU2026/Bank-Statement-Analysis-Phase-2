@@ -1,6 +1,18 @@
 ![4dd77614-fa41-4e0c-bd49-f0af44521598_removalai_preview](https://github.com/user-attachments/assets/d5ee3125-9512-4877-878d-dff3db0b86b1)
 
+
 ## Mifos Summer of Code 2025 — Phase II: Bank Statement Analysis & Real-Time Insights  
+<div align="center" id="top">
+<img src="https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge" alt="Contributions Welcome" />
+  <img src="https://img.shields.io/badge/Made%20with-Python-blue?style=for-the-badge" alt="Python Badge" />
+  <img src="https://img.shields.io/badge/Social%20Summer%20of%20Code-2025-blueviolet?style=for-the-badge" alt="SSoC Badge" />
+  <img src="https://img.shields.io/badge/AI-MultiDomain-red?style=for-the-badge" alt="AI MultiDomain Badge" />
+  <br>
+  <img src="https://img.shields.io/github/repo-size/PRIYANSHU2026/DataSentience-AIML?style=for-the-badge&color=orange" alt="Repo Size" />
+  <img src="https://img.shields.io/github/stars/PRIYANSHU2026/DataSentience-AIML?style=for-the-badge&color=yellow" alt="Stars" />
+  <img src="https://img.shields.io/github/forks/PRIYANSHU2026/DataSentience-AIML?style=for-the-badge&color=purple" alt="Forks" />
+  <img src="https://img.shields.io/github/issues/PRIYANSHU2026/DataSentience-AIML?style=for-the-badge&color=teal" alt="Issues" />
+</div>
 
 The **AI-Driven Financial Wellness Platform** represents a significant advancement in personal financial analytics by integrating machine learning, natural language processing (NLP), and real-time dashboards into a unified system for analyzing bank statements and generating adaptive budgeting strategies. This project was developed under the **Mifos Summer of Code 2025** initiative with the goal of empowering users to make informed financial decisions through intelligent insights derived from their transactional data.
 
