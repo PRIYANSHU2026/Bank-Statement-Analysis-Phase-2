@@ -1,6 +1,5 @@
-<p align="center">
-![4dd77614-fa41-4e0c-bd49-f0af44521598_removalai_preview](https://github.com/user-attachments/assets/b4b90e5c-78da-457f-a3ea-fe98f4c2cf4f)
-</p>
+![4dd77614-fa41-4e0c-bd49-f0af44521598_removalai_preview](https://github.com/user-attachments/assets/d5ee3125-9512-4877-878d-dff3db0b86b1)
+
 ## Mifos Summer of Code 2025 — Phase II: Bank Statement Analysis & Real-Time Insights  
 
 The **AI-Driven Financial Wellness Platform** represents a significant advancement in personal financial analytics by integrating machine learning, natural language processing (NLP), and real-time dashboards into a unified system for analyzing bank statements and generating adaptive budgeting strategies. This project was developed under the **Mifos Summer of Code 2025** initiative with the goal of empowering users to make informed financial decisions through intelligent insights derived from their transactional data.
