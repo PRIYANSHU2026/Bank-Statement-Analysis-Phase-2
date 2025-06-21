@@ -145,6 +145,9 @@ D --> E[Recommendations]
 E --> F[Streamlit Dashboard]
 ```
 
+<img width="955" alt="image" src="https://github.com/user-attachments/assets/0441f43b-641e-4699-b370-1641ef095de0" />
+
+
 > 📌 **Figure Placeholder**: Replace with Mermaid or draw.io diagram in `/figures/architecture.png`
 
 The system begins with **data ingestion** through either manual PDF uploads or direct API integrations. Raw data is processed through an **ETL pipeline** before being fed into various **ML models** for scoring and categorization. The results are then passed to the **recommendation engine**, which generates actionable advice such as reducing dining spend by a certain percentage or adopting a debt repayment strategy like the Snowball or Avalanche method. Finally, these insights are visualized through an **interactive dashboard** built with **Streamlit and Plotly**, offering intuitive charts, trend lines, and alerts for anomalies.
