@@ -113,8 +113,9 @@ A central feature of the platform is the **Financial Health Score (FHS)**, a com
 $$
 \text{FHS} = 
 $$
-\underbrace{(1 - \frac{\sigma_{\text{income}}}{\mu_{\text{income}}}) \times 25}_{\text{Income Stability}} + 
-\underbrace{(\text{Savings Rate} \times 0.4) \times 25}_{\text{Savings}} + 
+\underbrace{(1 - \frac{\sigma_{\text{income}}}{\mu_{\text{income}}}) \times 25}_{\text{Income Stability}} + \underbrace{(\text{Savings Rate} \times 0.4) \times 25}_{\text{Savings}} + 
+$$
+
 $$
 \underbrace{(1 - \text{DTI}) \times 25}_{\text{Debt Health}}
 $$
