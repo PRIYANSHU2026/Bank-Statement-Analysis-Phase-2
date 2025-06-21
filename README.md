@@ -1,3 +1,4 @@
+![4dd77614-fa41-4e0c-bd49-f0af44521598_removalai_preview](https://github.com/user-attachments/assets/854a9d7a-8b4c-48d2-98e9-dc55a956fd50)
 
 
 ## Mifos Summer of Code 2025 — Phase II: Bank Statement Analysis & Real-Time Insights  
