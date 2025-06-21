@@ -179,7 +179,11 @@ The repository follows a clean, organized structure to support modularity and ea
 ```
 
 > 📌 **Figure Placeholder**:
-- `architecture.png`: Upload system architecture flowchart
+- <img width="780" alt="image" src="https://github.com/user-attachments/assets/210531cf-f36d-47e5-be7e-2646193b3f46" />
+- <img width="1056" alt="image" src="https://github.com/user-attachments/assets/629ead11-a248-4a9b-b80d-e9fd5e2ebfc7" />
+- <img width="767" alt="image" src="https://github.com/user-attachments/assets/1acd406e-1e83-415f-972e-ad53c1d60fbb" />
+
+
 - `dashboard_preview.png`: Add screenshot of interactive dashboard
 - `fhs_distribution.png`: Add histogram/bar chart showing FHS distribution across users
 
