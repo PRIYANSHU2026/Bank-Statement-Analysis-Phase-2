@@ -111,9 +111,7 @@ To uncover spending behaviors and group similar users, the system utilizes **DBS
 A central feature of the platform is the **Financial Health Score (FHS)**, a composite metric ranging from 0 to 100 that evaluates overall financial well-being. The score combines three key indicators—Income Stability, Savings Rate, and Debt Health—each contributing 25 points to the final score:
 
 $$
-\text{FHS} = 
-$$
-\underbrace{(1 - \frac{\sigma_{\text{income}}}{\mu_{\text{income}}}) \times 25}_{\text{Income Stability}} + 
+\text{FHS} = \underbrace{(1 - \frac{\sigma_{\text{income}}}{\mu_{\text{income}}}) \times 25}_{\text{Income Stability}} + 
 $$
 
 $$
