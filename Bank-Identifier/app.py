@@ -81,6 +81,10 @@ BANK_APP_CONFIG = {
 if 'running_banks' not in st.session_state:
     st.session_state.running_banks = {}
 
+# Track redirect status
+if 'redirected' not in st.session_state:
+    st.session_state.redirected = False
+
 
 def launch_bank_app(bank_name):
     """Launch bank-specific Streamlit app in background"""
@@ -134,13 +138,24 @@ if uploaded_file is not None:
             config = BANK_APP_CONFIG[bank_name]
             bank_url = f"http://localhost:{config['port']}/"
 
-        # Open bank app in new tab
+        # Prepare URL with session ID
         bank_url += f"?session_id={session_id}"
-        js = f"window.open('{bank_url}')"
 
+        # Automatic redirection logic
+        if not st.session_state.redirected:
+            # JavaScript injection for automatic redirection
+            js_redirect = f"""
+            <script>
+                window.open('{bank_url}', '_blank');
+            </script>
+            """
+            st.components.v1.html(js_redirect, height=0)
+            st.session_state.redirected = True
+
+        # Fallback button in case redirection fails
         st.markdown(f"""
         <div style="text-align:center; margin-top:30px">
-            <button onclick="{js}" style="
+            <button onclick="window.open('{bank_url}', '_blank')" style="
                 background-color: #4CAF50;
                 border: none;
                 color: white;
@@ -155,7 +170,7 @@ if uploaded_file is not None:
                 box-shadow: 0 4px 8px rgba(0,0,0,0.2);
                 transition: all 0.3s ease;
             ">
-                ⚡️ Open {bank_name} Analyzer
+                ⚡️ Open {bank_name} Analyzer (Fallback)
             </button>
         </div>
         """, unsafe_allow_html=True)
@@ -170,3 +185,7 @@ if uploaded_file is not None:
         # Creative visualization
         st.image("https://cdn.pixabay.com/photo/2018/05/18/15/30/web-design-3411373_960_720.jpg",
                  caption="Advanced Bank Analytics Dashboard")
+
+# Reset redirect state when new file is uploaded
+if uploaded_file is None and st.session_state.redirected:
+    st.session_state.redirected = False
