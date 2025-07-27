@@ -21,7 +21,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 # Mistral API Configuration
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "yQdfM8MLbX9uhInQ7id4iUTwN4h4pDLX")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "bPj0wARXs5dk2L1ipFOdoqHMmQnXuMNv")
 
 # Advanced ML and NLP imports
 try:
