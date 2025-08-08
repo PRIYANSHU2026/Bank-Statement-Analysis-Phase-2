@@ -1,3 +1,4 @@
+ 
 import streamlit as st
 import pdfplumber
 import re
@@ -18,6 +19,7 @@ import subprocess
 import time
 import requests
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from dateutil.relativedelta import relativedelta
 
 # Mistral API Configuration
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
@@ -43,6 +45,106 @@ st.set_page_config(
     initial_sidebar_state='expanded'
 )
 
+# Custom CSS for improved UI
+st.markdown('''
+<style>
+    /* Main theme colors */
+    :root {
+        --primary-color: #4F8BF9;
+        --secondary-color: #1E88E5;
+        --background-color: #FAFAFA;
+        --text-color: #212121;
+        --light-text-color: #757575;
+        --accent-color: #FF4081;
+        --success-color: #4CAF50;
+        --warning-color: #FFC107;
+        --error-color: #F44336;
+    }
+    
+    /* Main container styling */
+    .main .block-container {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+    
+    /* Card-like elements */
+    div[data-testid="stExpander"] {
+        border: 1px solid #E0E0E0;
+        border-radius: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        margin-bottom: 1rem;
+    }
+    
+    /* Headings */
+    h1, h2, h3 {
+        color: var(--primary-color);
+        font-weight: 600;
+    }
+    
+    /* Metrics styling */
+    div[data-testid="stMetric"] {
+        background-color: white;
+        border-radius: 8px;
+        padding: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    /* Button styling */
+    .stButton > button {
+        border-radius: 20px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] .block-container {
+        padding-top: 2rem;
+        background-color: #F5F7FA;
+    }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 4px 4px 0 0;
+        padding: 8px 16px;
+        font-weight: 500;
+    }
+    
+    /* Dataframe styling */
+    .stDataFrame {        
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    
+    /* File uploader */
+    .stFileUploader > div > div {
+        border-radius: 8px;
+        border: 2px dashed #E0E0E0;
+        padding: 1.5rem;
+    }
+    
+    /* Progress bar */
+    div[data-testid="stProgressBar"] > div {
+        border-radius: 10px;
+        height: 10px;
+    }
+    
+    /* Alerts */
+    div[data-testid="stAlert"] {
+        border-radius: 8px;
+    }
+</style>
+''', unsafe_allow_html=True)
+
 # Initialize session state
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = None
@@ -56,6 +158,10 @@ if 'mistral_insights' not in st.session_state:
     st.session_state.mistral_insights = None
 if 'ai_assistant_active' not in st.session_state:
     st.session_state.ai_assistant_active = False
+if 'budgets' not in st.session_state:
+    st.session_state.budgets = {}
+if 'budget_forecast' not in st.session_state:
+    st.session_state.budget_forecast = None
 
 
 class DatabaseManager:
@@ -133,6 +239,19 @@ class DatabaseManager:
             )
         ''')
 
+        # Budgets table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                category TEXT NOT NULL,
+                budget_amount REAL NOT NULL,
+                month_year TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES user_profiles (user_id)
+            )
+        ''')
+
         conn.commit()
         conn.close()
 
@@ -184,6 +303,38 @@ class DatabaseManager:
             return dict(zip(columns, result))
         return None
 
+    # ADDED THE MISSING BUDGET METHODS
+    def save_budgets(self, user_id, budgets, month_year):
+        """Save budgets to database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        # Delete existing budgets for this month
+        cursor.execute('DELETE FROM budgets WHERE user_id = ? AND month_year = ?', (user_id, month_year))
+
+        # Insert new budgets
+        for category, amount in budgets.items():
+            cursor.execute('''
+                INSERT INTO budgets (user_id, category, budget_amount, month_year)
+                VALUES (?, ?, ?, ?)
+            ''', (user_id, category, amount, month_year))
+
+        conn.commit()
+        conn.close()
+        return True
+
+    def get_budgets(self, user_id, month_year):
+        """Get budgets for a specific month"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT category, budget_amount FROM budgets WHERE user_id = ? AND month_year = ?',
+                       (user_id, month_year))
+        results = cursor.fetchall()
+        conn.close()
+
+        return {row[0]: row[1] for row in results} if results else {}
+
 
 class PersonalizationEngine:
     """Advanced personalization and recommendation system"""
@@ -205,6 +356,7 @@ class PersonalizationEngine:
         df['DayOfWeek'] = df['Date'].dt.dayofweek
         df['Month'] = df['Date'].dt.month
         df['IsWeekend'] = df['DayOfWeek'].isin([5, 6])
+        df['Hour'] = df['Date'].dt.hour  # For hourly analysis
 
         patterns = {
             'spending_by_category': spending_by_category.to_dict(),
@@ -214,7 +366,8 @@ class PersonalizationEngine:
             },
             'monthly_trends': df.groupby('Month')['Amount'].mean().to_dict(),
             'transaction_frequency': len(df) / max(1, (df['Date'].max() - df['Date'].min()).days),
-            'balance_trend': df['Balance'].iloc[-1] - df['Balance'].iloc[0] if len(df) > 1 else 0
+            'balance_trend': df['Balance'].iloc[-1] - df['Balance'].iloc[0] if len(df) > 1 else 0,
+            'hourly_trends': df.groupby('Hour')['Amount'].mean().to_dict()
         }
 
         return patterns
@@ -1206,7 +1359,8 @@ def create_advanced_visualizations(df, patterns, recommendations):
         df.groupby('Category')['Amount'].sum().abs().reset_index(),
         path=['Category'],
         values='Amount',
-        title='Spending Distribution by Category (Treemap)'
+        title='Spending Distribution by Category (Treemap)',
+        color_discrete_sequence=px.colors.sequential.RdBu_r
     )
     st.plotly_chart(fig_treemap, use_container_width=True)
 
@@ -1238,52 +1392,448 @@ def create_advanced_visualizations(df, patterns, recommendations):
     fig_timeseries.update_layout(title='Daily Spending Trend with Projection')
     st.plotly_chart(fig_timeseries, use_container_width=True)
 
-    # 4. Category-wise monthly analysis
-    df['Month'] = df['Date'].dt.to_period('M')
-    monthly_category = df.groupby(['Month', 'Category'])['Amount'].sum().abs().reset_index()
-    monthly_category['Month'] = monthly_category['Month'].astype(str)
+    # 4. Income vs Expenses Comparison
+    st.markdown("### 💰 Income vs Expenses")
+    col1, col2 = st.columns(2)
 
-    fig_monthly = px.bar(
-        monthly_category,
-        x='Month',
-        y='Amount',
-        color='Category',
-        title='Monthly Spending by Category'
-    )
-    st.plotly_chart(fig_monthly, use_container_width=True)
-
-    # 5. Interactive Sunburst Chart
-    if 'Category' in df.columns:
-        # Create a hierarchical structure for sunburst
-        df['Transaction Type'] = df['Amount'].apply(lambda x: 'Income' if x > 0 else 'Expense')
-        category_sum = df.groupby(['Transaction Type', 'Category'])['Amount'].sum().abs().reset_index()
-
-        fig_sunburst = px.sunburst(
-            category_sum,
-            path=['Transaction Type', 'Category'],
+    with col1:
+        # Income sources
+        income_df = df[df['Amount'] > 0].groupby('Category')['Amount'].sum().reset_index()
+        fig_income = px.pie(
+            income_df,
             values='Amount',
-            title='Income vs Expense Breakdown',
-            color='Transaction Type',
-            color_discrete_map={'Income': '#00CC96', 'Expense': '#EF553B'}
+            names='Category',
+            title='Income Sources Distribution',
+            hole=0.3
         )
-        st.plotly_chart(fig_sunburst, use_container_width=True)
+        fig_income.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_income, use_container_width=True)
 
-    # 6. Interactive Parallel Categories
-    if len(df) > 50:
-        # Sample data to avoid overplotting
-        sample_df = df.sample(min(200, len(df)))
+    with col2:
+        # Expense breakdown
+        expense_df = df[df['Amount'] < 0].copy()
+        expense_df['Amount'] = expense_df['Amount'].abs()
+        expense_df = expense_df.groupby('Category')['Amount'].sum().reset_index()
+        fig_expense = px.pie(
+            expense_df,
+            values='Amount',
+            names='Category',
+            title='Expense Breakdown',
+            hole=0.3
+        )
+        fig_expense.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_expense, use_container_width=True)
 
-        # Create day of week column
-        sample_df['DayOfWeek'] = sample_df['Date'].dt.day_name()
+    # 5. Cumulative Cash Flow
+    st.markdown("### 📈 Cumulative Cash Flow")
+    df_sorted = df.sort_values('Date')
+    df_sorted['Cumulative'] = df_sorted['Amount'].cumsum()
 
-        fig_parallel = px.parallel_categories(
-            sample_df,
-            dimensions=['Category', 'DayOfWeek'],
+    fig_cumulative = px.area(
+        df_sorted,
+        x='Date',
+        y='Cumulative',
+        title='Cumulative Cash Flow Over Time',
+        labels={'Cumulative': 'Balance (R)'}
+    )
+    fig_cumulative.add_hline(y=0, line_dash="dash", line_color="red")
+    st.plotly_chart(fig_cumulative, use_container_width=True)
+
+    # 6. Spending by Day of Week and Time
+    st.markdown("### 📅 Spending Patterns by Time")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Day of week analysis
+        df['DayOfWeek'] = df['Date'].dt.day_name()
+        day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        day_spending = df[df['Amount'] < 0].groupby('DayOfWeek')['Amount'].sum().abs().reindex(day_order).reset_index()
+
+        fig_day = px.bar(
+            day_spending,
+            x='DayOfWeek',
+            y='Amount',
+            title='Total Spending by Day of Week',
+            labels={'Amount': 'Total Spending (R)'},
             color='Amount',
-            color_continuous_scale=px.colors.sequential.Inferno,
-            title='Category Patterns by Day of Week'
+            color_continuous_scale='Bluered'
         )
-        st.plotly_chart(fig_parallel, use_container_width=True)
+        st.plotly_chart(fig_day, use_container_width=True)
+
+    with col2:
+        # Hourly spending (if data available)
+        if 'Hour' in df.columns:
+            hour_spending = df[df['Amount'] < 0].groupby('Hour')['Amount'].sum().abs().reset_index()
+
+            fig_hour = px.bar(
+                hour_spending,
+                x='Hour',
+                y='Amount',
+                title='Total Spending by Hour of Day',
+                labels={'Amount': 'Total Spending (R)'},
+                color='Amount',
+                color_continuous_scale='Tealgrn'
+            )
+            st.plotly_chart(fig_hour, use_container_width=True)
+        else:
+            st.info("Hour data not available for spending patterns")
+
+    # 7. Financial Health Radar Chart
+    st.markdown("### 📊 Financial Health Overview")
+    if 'score_components' in patterns:
+        health_metrics = patterns['score_components']
+        categories = list(health_metrics.keys())
+        values = list(health_metrics.values())
+
+        # Close the radar chart
+        categories.append(categories[0])
+        values.append(values[0])
+
+        fig_radar = go.Figure(
+            data=go.Scatterpolar(
+                r=values,
+                theta=categories,
+                fill='toself',
+                name='Financial Health'
+            )
+        )
+
+        fig_radar.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 25]  # Max 25 per component
+                )),
+            showlegend=False,
+            title='Financial Health Score Breakdown'
+        )
+        st.plotly_chart(fig_radar, use_container_width=True)
+
+    # 8. Interactive Category Drill-Down
+    st.markdown("### 🔍 Category Spending Analysis")
+    df_expenses = df[df['Amount'] < 0].copy()
+    df_expenses['Amount'] = df_expenses['Amount'].abs()
+
+    # Select category to drill down
+    categories = df_expenses['Category'].unique().tolist()
+    selected_category = st.selectbox("Select Category to Analyze", categories)
+
+    if selected_category:
+        category_df = df_expenses[df_expenses['Category'] == selected_category]
+
+        # Top merchants in category
+        top_merchants = category_df.groupby('Description')['Amount'].sum().nlargest(5).reset_index()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            fig_merchants = px.bar(
+                top_merchants,
+                x='Description',
+                y='Amount',
+                title=f'Top Merchants in {selected_category}',
+                labels={'Amount': 'Total Spending (R)'},
+                color='Amount',
+                color_continuous_scale='Magenta'
+            )
+            st.plotly_chart(fig_merchants, use_container_width=True)
+
+        with col2:
+            # Monthly trend for category
+            category_df['Month'] = category_df['Date'].dt.to_period('M')
+            monthly_spending = category_df.groupby('Month')['Amount'].sum().reset_index()
+            monthly_spending['Month'] = monthly_spending['Month'].astype(str)
+
+            fig_monthly = px.line(
+                monthly_spending,
+                x='Month',
+                y='Amount',
+                title=f'Monthly Spending Trend for {selected_category}',
+                markers=True
+            )
+            st.plotly_chart(fig_monthly, use_container_width=True)
+
+    # 9. Balance Projection
+    st.markdown("### 🔮 Balance Projection")
+    balance_df = df[['Date', 'Balance']].copy()
+    balance_df = balance_df.sort_values('Date')
+
+    # Simple projection
+    last_date = balance_df['Date'].max()
+    future_dates = pd.date_range(
+        start=last_date + timedelta(days=1),
+        periods=30,
+        freq='D'
+    )
+
+    # Simple linear projection
+    balance_dates = balance_df['Date'].values.astype(np.int64) // 10 ** 9
+    balance_values = balance_df['Balance'].values
+
+    if len(balance_dates) > 1:
+        balance_coeffs = np.polyfit(balance_dates, balance_values, 1)
+        balance_model = np.poly1d(balance_coeffs)
+
+        future_timestamps = future_dates.values.astype(np.int64) // 10 ** 9
+        future_balances = balance_model(future_timestamps)
+
+        # Create projection dataframe
+        projection_df = pd.DataFrame({
+            'Date': future_dates,
+            'Balance': future_balances,
+            'Type': 'Projection'
+        })
+
+        # Combine with historical data
+        history_df = pd.DataFrame({
+            'Date': balance_df['Date'],
+            'Balance': balance_df['Balance'],
+            'Type': 'Historical'
+        })
+
+        combined_df = pd.concat([history_df, projection_df])
+
+        fig_projection = px.line(
+            combined_df,
+            x='Date',
+            y='Balance',
+            color='Type',
+            title='Account Balance Projection',
+            line_dash='Type'
+        )
+        fig_projection.add_vline(x=last_date, line_dash="dash", line_color="red")
+        st.plotly_chart(fig_projection, use_container_width=True)
+    else:
+        st.info("Not enough data for balance projection")
+
+
+def financial_budget_tracker():
+    """Financial Budget Tracker with advanced analytics"""
+    st.markdown("## 💰 Financial Budget Tracker")
+
+    if st.session_state.transactions_df is None or st.session_state.transactions_df.empty:
+        st.warning("Please upload and analyze a bank statement first")
+        return
+
+    df = st.session_state.transactions_df.copy()
+    user_id = st.session_state.user_profile['user_id']
+    db = DatabaseManager()
+
+    # Prepare date range
+    min_date = df['Date'].min().to_pydatetime()
+    max_date = df['Date'].max().to_pydatetime()
+
+    # Month selection
+    month_options = pd.date_range(min_date, max_date, freq='MS').strftime("%Y-%m").tolist()
+    if not month_options:
+        st.warning("No valid months found in transaction data")
+        return
+
+    selected_month = st.selectbox("Select Month for Budget Tracking",
+                                  month_options,
+                                  index=len(month_options) - 1 if month_options else 0)
+
+    # Convert to datetime
+    month_start = datetime.strptime(selected_month, "%Y-%m")
+    month_end = month_start + relativedelta(months=1) - timedelta(days=1)
+
+    # Filter transactions for selected month
+    monthly_df = df[(df['Date'] >= month_start) & (df['Date'] <= month_end)]
+
+    # Get spending categories
+    expense_df = monthly_df[monthly_df['Amount'] < 0].copy()
+    if expense_df.empty:
+        st.info("No expenses found for the selected month")
+        return
+
+    expense_df['Amount'] = expense_df['Amount'].abs()
+    categories = expense_df['Category'].unique().tolist()
+
+    st.divider()
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        st.markdown("### 📝 Set Your Budgets")
+        budgets = {}
+
+        # Get existing budgets for this month
+        existing_budgets = db.get_budgets(user_id, selected_month)
+
+        for category in categories:
+            default_value = existing_budgets.get(category, 0.0)
+            budget = st.number_input(
+                f"Budget for {category} (R)",
+                min_value=0.0,
+                value=float(default_value),
+                key=f"budget_{category}_{selected_month}"  # Unique key per month
+            )
+            budgets[category] = budget
+
+        if st.button("💾 Save Budgets"):
+            db.save_budgets(user_id, budgets, selected_month)
+            st.session_state.budgets = budgets
+            st.success("Budgets saved successfully!")
+            st.rerun()
+
+    with col2:
+        st.markdown("### 📊 Budget vs Actual Spending")
+
+        # Calculate actual spending
+        actual_spending = expense_df.groupby('Category')['Amount'].sum()
+
+        # Create comparison dataframe
+        comparison_data = []
+        for category in categories:
+            actual = actual_spending.get(category, 0.0)
+            budget = budgets.get(category, 0.0)
+            utilization = (actual / budget * 100) if budget > 0 else 0
+
+            comparison_data.append({
+                'Category': category,
+                'Budget': budget,
+                'Actual': actual,
+                'Difference': budget - actual,
+                'Utilization (%)': min(utilization, 200)  # Cap at 200% for visualization
+            })
+
+        comparison_df = pd.DataFrame(comparison_data)
+
+        if not comparison_df.empty:
+            # Bar chart comparing budget vs actual
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=comparison_df['Category'],
+                y=comparison_df['Budget'],
+                name='Budget',
+                marker_color='#1f77b4'
+            ))
+            fig.add_trace(go.Bar(
+                x=comparison_df['Category'],
+                y=comparison_df['Actual'],
+                name='Actual Spending',
+                marker_color='#ff7f0e'
+            ))
+
+            fig.update_layout(
+                barmode='group',
+                title='Budget vs Actual Spending',
+                xaxis_title='Category',
+                yaxis_title='Amount (R)',
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Utilization gauge charts
+            st.markdown("### 📈 Budget Utilization")
+            cols = st.columns(3)
+            for i, row in comparison_df.iterrows():
+                with cols[i % 3]:
+                    fig_gauge = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=row['Utilization (%)'],
+                        domain={'x': [0, 1], 'y': [0, 1]},
+                        title={'text': f"{row['Category']}"},
+                        gauge={
+                            'axis': {'range': [None, 200]},
+                            'bar': {'color': "darkblue"},
+                            'steps': [
+                                {'range': [0, 80], 'color': "green"},
+                                {'range': [80, 100], 'color': "yellow"},
+                                {'range': [100, 200], 'color': "red"}
+                            ],
+                            'threshold': {
+                                'line': {'color': "black", 'width': 4},
+                                'thickness': 0.75,
+                                'value': row['Utilization (%)']
+                            }
+                        }
+                    ))
+                    fig_gauge.update_layout(height=250)
+                    st.plotly_chart(fig_gauge, use_container_width=True)
+
+            # Budget performance table
+            st.markdown("### 📋 Budget Performance Details")
+            comparison_df['Status'] = comparison_df.apply(
+                lambda row: "✅ Within Budget" if row['Actual'] <= row['Budget'] else "⚠️ Over Budget",
+                axis=1
+            )
+            st.dataframe(
+                comparison_df[['Category', 'Budget', 'Actual', 'Difference', 'Utilization (%)', 'Status']],
+                use_container_width=True
+            )
+
+            # Budget forecasting
+            st.markdown("### 🔮 Budget Forecast")
+
+            # Calculate daily spending rate
+            today = datetime.now().date()
+            if today < month_start.date() or today > month_end.date():
+                st.info("Forecast only available during the current budget period")
+            else:
+                days_elapsed = (today - month_start.date()).days + 1
+                days_remaining = (month_end.date() - today).days
+
+                if days_elapsed > 0 and days_remaining > 0:
+                    forecast_data = []
+                    for category in categories:
+                        daily_spend_rate = actual_spending.get(category, 0) / days_elapsed
+                        projected_spend = daily_spend_rate * (days_elapsed + days_remaining)
+                        budget = budgets.get(category, 0)
+
+                        forecast_data.append({
+                            'Category': category,
+                            'Current Spending': actual_spending.get(category, 0),
+                            'Projected Spending': projected_spend,
+                            'Budget': budget,
+                            'Projected Surplus/Shortfall': budget - projected_spend
+                        })
+
+                    forecast_df = pd.DataFrame(forecast_data)
+                    st.session_state.budget_forecast = forecast_df
+
+                    # Display forecast table
+                    st.dataframe(
+                        forecast_df.style.applymap(
+                            lambda x: 'color: red' if x < 0 else 'color: green',
+                            subset=['Projected Surplus/Shortfall']
+                        ),
+                        use_container_width=True
+                    )
+
+                    # Forecast visualization
+                    fig_forecast = go.Figure()
+                    for i, row in forecast_df.iterrows():
+                        fig_forecast.add_trace(go.Bar(
+                            x=[row['Category']],
+                            y=[row['Current Spending']],
+                            name='Current Spending',
+                            marker_color='#1f77b4'
+                        ))
+                        fig_forecast.add_trace(go.Bar(
+                            x=[row['Category']],
+                            y=[row['Projected Spending'] - row['Current Spending']],
+                            name='Projected Additional',
+                            marker_color='#ff7f0e'
+                        ))
+                        fig_forecast.add_trace(go.Scatter(
+                            x=[row['Category']],
+                            y=[row['Budget']],
+                            mode='markers',
+                            name='Budget Limit',
+                            marker=dict(color='red', size=12, symbol='line-ns-open')
+                        ))
+
+                    fig_forecast.update_layout(
+                        barmode='stack',
+                        title='Current vs Projected Spending',
+                        xaxis_title='Category',
+                        yaxis_title='Amount (R)',
+                        height=500
+                    )
+                    st.plotly_chart(fig_forecast, use_container_width=True)
+                else:
+                    st.info("Forecast only available during the current budget period")
+        else:
+            st.info("No spending data available for the selected month")
 
 
 def ai_financial_assistant():
@@ -1387,95 +1937,315 @@ def main():
 
     # Sidebar for user authentication
     with st.sidebar:
-        st.title("🏦 Universal Bank Analyzer")
+        st.markdown("<h1 style='text-align: center;'>🏦 Universal Bank Analyzer</h1>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
 
         if st.session_state.user_profile is None:
-            tab1, tab2 = st.tabs(["Login", "Sign Up"])
+            tab1, tab2 = st.tabs(["🔑 Login", "✨ Sign Up"])
 
             with tab1:
-                st.subheader("Login")
-                email = st.text_input("Email", key="login_email")
-                password = st.text_input("Password", type="password", key="login_password")
-
-                if st.button("Login", key="login_btn"):
-                    user_data = db.authenticate_user(email, password)
-                    if user_data:
-                        user_id, name = user_data
-                        st.session_state.user_profile = db.get_user_profile(user_id)
-                        st.success(f"Welcome back, {name}!")
-                        st.rerun()
-                    else:
-                        st.error("Invalid credentials")
+                st.markdown("<h3 style='text-align: center; color: #4F8BF9;'>Welcome Back!</h3>", unsafe_allow_html=True)
+                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+                
+                with st.container():
+                    email = st.text_input("📧 Email Address", key="login_email")
+                    password = st.text_input("🔒 Password", type="password", key="login_password")
+                    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+                    
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col2:
+                        login_button = st.button("🔐 Login", key="login_btn", use_container_width=True)
+                    
+                    if login_button:
+                        with st.spinner("Authenticating..."):
+                            user_data = db.authenticate_user(email, password)
+                            if user_data:
+                                user_id, name = user_data
+                                st.session_state.user_profile = db.get_user_profile(user_id)
+                                st.success(f"Welcome back, {name}!")
+                                st.rerun()
+                            else:
+                                st.error("Invalid credentials")
 
             with tab2:
-                st.subheader("Create Account")
-                new_name = st.text_input("Full Name", key="signup_name")
-                new_email = st.text_input("Email", key="signup_email")
-                new_password = st.text_input("Password", type="password", key="signup_password")
-                monthly_income = st.number_input("Monthly Income (R)", min_value=0.0, key="signup_income")
-                risk_tolerance = st.selectbox("Risk Tolerance", ["conservative", "moderate", "aggressive"],
-                                              key="signup_risk")
-                financial_goals = st.text_area("Financial Goals", key="signup_goals")
-
-                if st.button("Create Account", key="signup_btn"):
-                    if new_name and new_email and new_password:
-                        user_id = hashlib.md5(new_email.encode()).hexdigest()[:8]
-                        if db.create_user(user_id, new_name, new_email, new_password, financial_goals, risk_tolerance,
-                                          monthly_income):
-                            st.success("Account created successfully! Please login.")
+                st.markdown("<h3 style='text-align: center; color: #4F8BF9;'>Create Your Account</h3>", unsafe_allow_html=True)
+                st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+                
+                with st.container():
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        new_name = st.text_input("👤 Full Name", key="signup_name")
+                    with col2:
+                        new_email = st.text_input("📧 Email Address", key="signup_email")
+                    
+                    new_password = st.text_input("🔒 Password", type="password", key="signup_password", 
+                                               help="Choose a strong password with at least 8 characters")
+                    
+                    st.markdown("<h4 style='color: #4F8BF9;'>Financial Profile</h4>", unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        monthly_income = st.number_input("💰 Monthly Income (R)", min_value=0.0, key="signup_income")
+                    with col2:
+                        risk_tolerance = st.selectbox("📊 Risk Tolerance", 
+                                                    ["conservative", "moderate", "aggressive"],
+                                                    key="signup_risk",
+                                                    help="Conservative: Low risk, Moderate: Balanced, Aggressive: Higher risk/reward")
+                    
+                    financial_goals = st.text_area("🎯 Financial Goals", key="signup_goals", 
+                                                placeholder="e.g., Save for retirement, Buy a house, Pay off debt...")
+                    
+                    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+                    
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col2:
+                        signup_button = st.button("✅ Create Account", key="signup_btn", use_container_width=True)
+                    
+                    if signup_button:
+                        if new_name and new_email and new_password:
+                            if len(new_password) < 8:
+                                st.warning("Password should be at least 8 characters long")
+                            else:
+                                with st.spinner("Creating your account..."):
+                                    user_id = hashlib.md5(new_email.encode()).hexdigest()[:8]
+                                    if db.create_user(user_id, new_name, new_email, new_password, financial_goals, risk_tolerance,
+                                                    monthly_income):
+                                        st.success("Account created successfully! Please login.")
+                                    else:
+                                        st.error("Email already exists")
                         else:
-                            st.error("Email already exists")
-                    else:
-                        st.error("Please fill all required fields")
-                        st.rerun()
+                            st.error("Please fill all required fields")
 
         else:
-            st.success(f"Welcome, {st.session_state.user_profile['name']}!")
-            if st.button("Logout"):
+            # User profile card
+            st.markdown(f"""
+            <div style='background-color: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h3 style='color: #4F8BF9; margin-top: 0;'>👋 Welcome!</h3>
+                <p style='font-size: 18px; font-weight: 500;'>{st.session_state.user_profile['name']}</p>
+                <p style='color: #757575; margin-bottom: 5px;'>{st.session_state.user_profile['email']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+            
+            # Quick stats
+            if st.session_state.transactions_df is not None:
+                df = st.session_state.transactions_df
+                total_income = df[df['Amount'] > 0]['Amount'].sum()
+                total_expenses = abs(df[df['Amount'] < 0]['Amount'].sum())
+                
+                st.markdown("<h4 style='color: #4F8BF9;'>Quick Stats</h4>", unsafe_allow_html=True)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Income", f"R{total_income:,.2f}")
+                with col2:
+                    st.metric("Expenses", f"R{total_expenses:,.2f}")
+            
+            st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+            
+            # Logout button
+            if st.button("🚪 Logout", use_container_width=True):
                 st.session_state.user_profile = None
                 st.session_state.transactions_df = None
                 st.session_state.analysis_complete = False
                 st.session_state.detected_bank = None
                 st.session_state.mistral_insights = None
+                st.session_state.budgets = {}
+                st.session_state.budget_forecast = None
                 st.experimental_rerun()
 
     # Main content area
     if st.session_state.user_profile is None:
+        # Hero section with modern design
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown("""
+            <div style='padding: 1.5rem 0;'>
+                <h1 style='font-size: 3rem; font-weight: 700; color: #4F8BF9;'>🏦 Universal Bank Statement Analysis</h1>
+                <p style='font-size: 1.2rem; color: #757575; margin-bottom: 2rem;'>The next generation of financial analysis for all major banks</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Call-to-action button
+            st.markdown("""
+            <div style='background-color: #F5F7FA; padding: 1.5rem; border-radius: 10px; margin-bottom: 2rem;'>
+                <h3 style='color: #4F8BF9; margin-top: 0;'>Ready to take control of your finances?</h3>
+                <p>Create an account or login to get started with your financial journey.</p>
+                <p style='font-weight: 500;'>👉 Use the sidebar to login or create your account</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            # Decorative image or icon
+            st.markdown("""
+            <div style='display: flex; justify-content: center; align-items: center; height: 100%;'>
+                <svg width="200" height="200" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="6" width="20" height="12" rx="2" fill="#4F8BF9" opacity="0.2"/>
+                    <rect x="2" y="6" width="20" height="12" rx="2" stroke="#4F8BF9" stroke-width="2"/>
+                    <path d="M12 2V4" stroke="#4F8BF9" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 20V22" stroke="#4F8BF9" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M8 12H16" stroke="#4F8BF9" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 9V15" stroke="#4F8BF9" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Features section with cards
         st.markdown("""
-        # 🏦 Universal Bank Statement Analysis
-
-        ### Welcome to the next generation of financial analysis for all major banks!
-
-        **Supported Banks:**
-        - FNB (First National Bank)
-        - Standard Bank
-        - Nedbank
-        - ABSA
-        - Capitec Bank
-
-        **Key Features:**
-        - 🤖 **AI-Powered Insights**: Advanced machine learning for personalized recommendations
-        - 📊 **Comprehensive Analytics**: Deep dive into your spending patterns
-        - 🎯 **Goal Tracking**: Set and monitor your financial objectives
-        - 🔮 **Predictive Analysis**: Forecast future spending trends
-        - 🛡️ **Anomaly Detection**: Identify unusual transactions
-        - 💡 **Smart Recommendations**: Personalized financial advice
-        - 💰 **Loan Eligibility**: Check your loan eligibility instantly
-
-        **Please login or create an account to get started.**
-        """)
+        <h2 style='color: #4F8BF9; margin-top: 2rem;'>Key Features</h2>
+        <div style='height: 20px;'></div>
+        """, unsafe_allow_html=True)
+        
+        # Row 1 of feature cards
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; height: 200px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h3 style='color: #4F8BF9; font-size: 1.5rem;'>🤖 AI-Powered Insights</h3>
+                <p>Advanced machine learning algorithms analyze your financial data to provide personalized recommendations and insights.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown("""
+            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; height: 200px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h3 style='color: #4F8BF9; font-size: 1.5rem;'>📊 Comprehensive Analytics</h3>
+                <p>Deep dive into your spending patterns with detailed visualizations and trend analysis to better understand your finances.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col3:
+            st.markdown("""
+            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; height: 200px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h3 style='color: #4F8BF9; font-size: 1.5rem;'>🎯 Goal Tracking</h3>
+                <p>Set financial goals and track your progress over time with our intuitive goal tracking system.</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Row 2 of feature cards
+        st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; height: 200px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h3 style='color: #4F8BF9; font-size: 1.5rem;'>🛡️ Anomaly Detection</h3>
+                <p>Automatically identify unusual transactions and potential fraud with our advanced anomaly detection system.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown("""
+            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; height: 200px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h3 style='color: #4F8BF9; font-size: 1.5rem;'>💰 Loan Eligibility</h3>
+                <p>Check your loan eligibility instantly with our predictive models based on your financial history and patterns.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col3:
+            st.markdown("""
+            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; height: 200px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h3 style='color: #4F8BF9; font-size: 1.5rem;'>💸 Budget Tracker</h3>
+                <p>Create and monitor budgets for different spending categories to keep your finances on track.</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Supported banks section
+        st.markdown("""
+        <div style='height: 40px;'></div>
+        <h2 style='color: #4F8BF9;'>Supported Banks</h2>
+        <div style='height: 20px;'></div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.markdown("""
+            <div style='background-color: white; padding: 1rem; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h4 style='color: #4F8BF9;'>FNB</h4>
+                <p>First National Bank</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown("""
+            <div style='background-color: white; padding: 1rem; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h4 style='color: #4F8BF9;'>Standard Bank</h4>
+                <p>Standard Bank SA</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col3:
+            st.markdown("""
+            <div style='background-color: white; padding: 1rem; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h4 style='color: #4F8BF9;'>Nedbank</h4>
+                <p>Nedbank Group</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col4:
+            st.markdown("""
+            <div style='background-color: white; padding: 1rem; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h4 style='color: #4F8BF9;'>ABSA</h4>
+                <p>ABSA Group Limited</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with col5:
+            st.markdown("""
+            <div style='background-color: white; padding: 1rem; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                <h4 style='color: #4F8BF9;'>Capitec</h4>
+                <p>Capitec Bank</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
         return
 
-    # Main analysis interface
-    st.title(f"🏦 Universal Bank Analysis Dashboard - {st.session_state.user_profile['name']}")
+    # Main analysis interface - Modern header with user profile
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"""
+        <div style='background-color: #4F8BF9; padding: 1rem; border-radius: 10px; margin-bottom: 1rem;'>
+            <h1 style='color: white; margin: 0;'>🏦 Universal Bank Analysis Dashboard</h1>
+            <p style='color: white; opacity: 0.9; margin: 0;'>Welcome back, {st.session_state.user_profile['name']}!</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        # User profile card
+        st.markdown(f"""
+        <div style='background-color: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center;'>
+            <div style='background-color: #4F8BF9; width: 50px; height: 50px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 0.5rem;'>
+                <span style='color: white; font-size: 1.5rem;'>{st.session_state.user_profile['name'][0].upper()}</span>
+            </div>
+            <p style='font-weight: bold; margin: 0;'>{st.session_state.user_profile['name']}</p>
+            <p style='color: #757575; font-size: 0.8rem; margin: 0;'>{st.session_state.user_profile['email']}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # File upload section
-    st.markdown("### 📄 Upload Your Bank Statement")
-    uploaded_file = st.file_uploader(
-        "Choose a PDF bank statement",
-        type="pdf",
-        help="Upload your bank statement in PDF format for analysis"
-    )
+    # File upload section with modern design
+    st.markdown("""
+    <div style='height: 20px;'></div>
+    <h3 style='color: #4F8BF9;'>📄 Upload Your Bank Statement</h3>
+    """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        uploaded_file = st.file_uploader(
+            "Choose a PDF bank statement",
+            type="pdf",
+            help="Upload your bank statement in PDF format for analysis"
+        )
+    
+    with col2:
+        st.markdown("""
+        <div style='background-color: #F5F7FA; padding: 1rem; border-radius: 10px; height: 100%;'>
+            <h4 style='color: #4F8BF9; margin-top: 0;'>Supported Banks</h4>
+            <p style='margin: 0; font-size: 0.9rem;'>FNB, Standard Bank, Nedbank, ABSA, Capitec</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     if uploaded_file is not None:
         try:
@@ -1522,6 +2292,7 @@ def main():
                 patterns = personalization.analyze_spending_patterns(df)
                 recommendations = personalization.generate_personalized_recommendations(df, patterns)
                 health_score, score_components = personalization.calculate_financial_health_score(df, patterns)
+                patterns['score_components'] = score_components  # Store for visualization
                 loan_prediction = analytics.enhanced_loan_prediction(df, bank_name)
                 df_with_anomalies = analytics.detect_anomalies(df)
 
@@ -1540,105 +2311,300 @@ def main():
                 st.info(f"Closing Balance: R{closing_balance:,.2f}")
 
             # Display results in tabs
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
                 "📊 Overview", "💡 Recommendations", "🏥 Health Score",
-                "🔍 Detailed Analysis", "🚨 Anomalies", "💰 Loan Eligibility", "🤖 AI Assistant"
+                "🔍 Detailed Analysis", "🚨 Anomalies", "💰 Loan Eligibility",
+                "📝 Budget Tracker", "🤖 AI Assistant"
             ])
 
             with tab1:
-                st.markdown("### 📈 Financial Overview")
+                # Modern Financial Overview with cards
+                st.markdown("""
+                <h3 style='color: #4F8BF9;'>📈 Financial Overview</h3>
+                <div style='height: 10px;'></div>
+                """, unsafe_allow_html=True)
+                
+                # Summary cards
+                col1, col2, col3, col4 = st.columns(4)
+                
+                # Calculate summary metrics
+                total_income = df[df['Amount'] > 0]['Amount'].sum()
+                total_expenses = abs(df[df['Amount'] < 0]['Amount'].sum())
+                net_flow = total_income - total_expenses
+                avg_daily_spending = total_expenses / max(1, len(df['Date'].unique()))
+                
+                with col1:
+                    st.markdown(f"""
+                    <div style='background-color: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                        <p style='color: #757575; font-size: 0.9rem; margin: 0;'>Total Income</p>
+                        <h2 style='color: #4F8BF9; margin: 0;'>R{total_income:,.2f}</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    st.markdown(f"""
+                    <div style='background-color: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                        <p style='color: #757575; font-size: 0.9rem; margin: 0;'>Total Expenses</p>
+                        <h2 style='color: #FF6B6B; margin: 0;'>R{total_expenses:,.2f}</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col3:
+                    color = "#4F8BF9" if net_flow >= 0 else "#FF6B6B"
+                    st.markdown(f"""
+                    <div style='background-color: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                        <p style='color: #757575; font-size: 0.9rem; margin: 0;'>Net Cash Flow</p>
+                        <h2 style='color: {color}; margin: 0;'>R{net_flow:,.2f}</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col4:
+                    st.markdown(f"""
+                    <div style='background-color: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                        <p style='color: #757575; font-size: 0.9rem; margin: 0;'>Avg. Daily Spending</p>
+                        <h2 style='color: #757575; margin: 0;'>R{avg_daily_spending:,.2f}</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+                
+                # Visualizations with better styling
                 create_advanced_visualizations(df, patterns, recommendations)
-
-                # Transaction table with enhanced features
-                st.markdown("### 📋 Transaction History")
-                st.dataframe(
-                    df[['Date', 'Description', 'Category', 'Amount', 'Balance']],
-                    use_container_width=True
-                )
-
-            with tab2:
+                
+                # Transaction history with modern styling
+                st.markdown("""
+                <div style='height: 20px;'></div>
+                <h3 style='color: #4F8BF9;'>📋 Transaction History</h3>
+                <div style='height: 10px;'></div>
+                """, unsafe_allow_html=True)
+                
+                # Search and filter options
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.markdown("### 💡 Personalized Recommendations")
+                    search_term = st.text_input("🔍 Search transactions", "")
                 with col2:
-                    if st.button("✨ Generate AI Insights", use_container_width=True):
+                    category_filter = st.selectbox("Filter by category", ["All Categories"] + sorted(df['Category'].unique().tolist()))
+                
+                # Apply filters
+                filtered_df = df.copy()
+                if search_term:
+                    filtered_df = filtered_df[filtered_df['Description'].str.contains(search_term, case=False)]
+                if category_filter != "All Categories":
+                    filtered_df = filtered_df[filtered_df['Category'] == category_filter]
+                
+                # Display filtered transactions with styling
+                st.dataframe(
+                    filtered_df[['Date', 'Description', 'Category', 'Amount', 'Balance']],
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # Transaction summary
+                st.markdown(f"""
+                <div style='background-color: #F5F7FA; padding: 0.5rem 1rem; border-radius: 5px; font-size: 0.9rem;'>
+                    Showing {len(filtered_df)} of {len(df)} transactions
+                </div>
+                """, unsafe_allow_html=True)
+
+            with tab2:
+                # Modern header with action button
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown("""
+                    <h3 style='color: #4F8BF9;'>💡 Personalized Recommendations</h3>
+                    """, unsafe_allow_html=True)
+                with col2:
+                    if st.button("✨ Generate AI Insights", use_container_width=True, type="primary"):
                         with st.spinner("Generating AI-powered insights..."):
                             st.session_state.mistral_insights = get_mistral_insights(
                                 df,
                                 st.session_state.user_profile,
                                 bank_name
                             )
-
+                
+                # AI Insights section with modern styling
                 if st.session_state.mistral_insights:
-                    st.markdown("#### 🤖 AI-Powered Financial Insights")
+                    st.markdown("""
+                    <div style='background-color: #F0F7FF; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #4F8BF9; margin-bottom: 1.5rem;'>
+                        <h4 style='color: #4F8BF9; margin-top: 0;'>🤖 AI-Powered Financial Insights</h4>
+                    """, unsafe_allow_html=True)
+                    
                     st.markdown(st.session_state.mistral_insights)
-                    st.divider()
-
+                    st.markdown("</div>", unsafe_allow_html=True)
+                
+                # Recommendations with card-based design
                 if recommendations:
-                    for i, rec in enumerate(recommendations):
-                        priority_color = {
-                            'high': '🔴',
-                            'medium': '🟡',
-                            'low': '🟢'
-                        }.get(rec['priority'], '⚪')
-
-                        st.markdown(f"""
-                        **{priority_color} {rec['title']}**
-
-                        {rec['description']}
-
-                        *Category: {rec['type'].title()} | Priority: {rec['priority'].title()}*
-                        """)
-                        st.divider()
+                    # Group recommendations by priority
+                    high_priority = [rec for rec in recommendations if rec['priority'] == 'high']
+                    medium_priority = [rec for rec in recommendations if rec['priority'] == 'medium']
+                    low_priority = [rec for rec in recommendations if rec['priority'] == 'low']
+                    
+                    # Display high priority recommendations
+                    if high_priority:
+                        st.markdown("""
+                        <h4 style='color: #FF6B6B;'>🔴 High Priority Recommendations</h4>
+                        <div style='height: 10px;'></div>
+                        """, unsafe_allow_html=True)
+                        
+                        for rec in high_priority:
+                            st.markdown(f"""
+                            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #FF6B6B; margin-bottom: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                                <h4 style='color: #FF6B6B; margin-top: 0;'>{rec['title']}</h4>
+                                <p>{rec['description']}</p>
+                                <p style='color: #757575; font-size: 0.9rem; margin-bottom: 0;'>Category: {rec['type'].title()} | Priority: High</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    # Display medium priority recommendations
+                    if medium_priority:
+                        st.markdown("""
+                        <h4 style='color: #FFB347;'>🟡 Medium Priority Recommendations</h4>
+                        <div style='height: 10px;'></div>
+                        """, unsafe_allow_html=True)
+                        
+                        for rec in medium_priority:
+                            st.markdown(f"""
+                            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #FFB347; margin-bottom: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                                <h4 style='color: #FFB347; margin-top: 0;'>{rec['title']}</h4>
+                                <p>{rec['description']}</p>
+                                <p style='color: #757575; font-size: 0.9rem; margin-bottom: 0;'>Category: {rec['type'].title()} | Priority: Medium</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    
+                    # Display low priority recommendations
+                    if low_priority:
+                        st.markdown("""
+                        <h4 style='color: #4CAF50;'>🟢 Low Priority Recommendations</h4>
+                        <div style='height: 10px;'></div>
+                        """, unsafe_allow_html=True)
+                        
+                        for rec in low_priority:
+                            st.markdown(f"""
+                            <div style='background-color: white; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #4CAF50; margin-bottom: 1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.05);'>
+                                <h4 style='color: #4CAF50; margin-top: 0;'>{rec['title']}</h4>
+                                <p>{rec['description']}</p>
+                                <p style='color: #757575; font-size: 0.9rem; margin-bottom: 0;'>Category: {rec['type'].title()} | Priority: Low</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                 else:
-                    st.info("💫 Great job! Your financial habits look healthy. Keep up the good work!")
+                    st.markdown("""
+                    <div style='background-color: #E8F5E9; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #4CAF50; text-align: center;'>
+                        <h4 style='color: #4CAF50; margin-top: 0;'>💫 Great job!</h4>
+                        <p>Your financial habits look healthy. Keep up the good work!</p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             with tab3:
-                st.markdown("### 🏥 Financial Health Score")
-
-                # Display overall score
+                # Modern header
+                st.markdown("""
+                <h3 style='color: #4F8BF9;'>🏥 Financial Health Score</h3>
+                <div style='height: 10px;'></div>
+                """, unsafe_allow_html=True)
+                
+                # Score overview card
+                score_color = "#4CAF50" if health_score >= 80 else "#FFB347" if health_score >= 60 else "#FF6B6B"
+                score_text = "Excellent" if health_score >= 80 else "Good" if health_score >= 60 else "Needs Attention"
+                
+                st.markdown(f"""
+                <div style='background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 1.5rem;'>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'>
+                        <div>
+                            <h2 style='color: {score_color}; margin: 0; font-size: 3rem;'>{health_score:.1f}</h2>
+                            <p style='color: #757575; margin: 0;'>out of 100</p>
+                            <p style='color: {score_color}; font-weight: bold; margin-top: 0.5rem;'>{score_text}</p>
+                        </div>
+                        <div style='width: 100px; height: 100px; border-radius: 50%; background: conic-gradient({score_color} {health_score}%, #f0f0f0 0); display: flex; align-items: center; justify-content: center;'>
+                            <div style='width: 80px; height: 80px; border-radius: 50%; background-color: white; display: flex; align-items: center; justify-content: center;'>
+                                <span style='font-weight: bold;'>{health_score:.1f}%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Display overall score with improved layout
                 col1, col2 = st.columns([1, 2])
 
                 with col1:
-                    # Create gauge chart for health score
+                    # Create gauge chart for health score with better styling
                     fig_gauge = go.Figure(go.Indicator(
                         mode="gauge+number+delta",
                         value=health_score,
                         domain={'x': [0, 1], 'y': [0, 1]},
-                        title={'text': "Financial Health Score"},
-                        delta={'reference': 75},
+                        title={'text': "Financial Health Score", 'font': {'color': "#4F8BF9", 'size': 16}},
+                        delta={'reference': 75, 'increasing': {'color': "#4CAF50"}, 'decreasing': {'color': "#FF6B6B"}},
                         gauge={
-                            'axis': {'range': [None, 100]},
-                            'bar': {'color': "darkblue"},
+                            'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "#4F8BF9"},
+                            'bar': {'color': "#4F8BF9"},
+                            'bgcolor': "white",
+                            'borderwidth': 2,
+                            'bordercolor': "#4F8BF9",
                             'steps': [
-                                {'range': [0, 25], 'color': "lightgray"},
-                                {'range': [25, 50], 'color': "gray"},
-                                {'range': [50, 75], 'color': "lightgreen"},
-                                {'range': [75, 100], 'color': "green"}
+                                {'range': [0, 25], 'color': "#FFCDD2"},  # Light red
+                                {'range': [25, 50], 'color': "#FFECB3"},  # Light yellow
+                                {'range': [50, 75], 'color': "#C8E6C9"},  # Light green
+                                {'range': [75, 100], 'color': "#A5D6A7"}   # Medium green
                             ],
                             'threshold': {
-                                'line': {'color': "red", 'width': 4},
+                                'line': {'color': "#4CAF50", 'width': 4},
                                 'thickness': 0.75,
                                 'value': 90
                             }
                         }
                     ))
-                    fig_gauge.update_layout(height=300)
+                    fig_gauge.update_layout(
+                        height=300,
+                        margin=dict(l=20, r=20, t=50, b=20),
+                        paper_bgcolor="white",
+                        font={'color': "#4F8BF9", 'family': "Arial"}
+                    )
                     st.plotly_chart(fig_gauge, use_container_width=True)
 
                 with col2:
-                    st.markdown("#### Score Breakdown")
+                    st.markdown("""
+                    <h4 style='color: #4F8BF9;'>Score Breakdown</h4>
+                    <div style='height: 10px;'></div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Component cards with better styling
                     for component, score in score_components.items():
                         component_name = component.replace('_', ' ').title()
-                        st.progress(score / 25, text=f"{component_name}: {score:.1f}/25")
+                        component_color = "#4CAF50" if score >= 20 else "#FFB347" if score >= 15 else "#FF6B6B"
+                        
+                        st.markdown(f"""
+                        <div style='background-color: white; padding: 1rem; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 0.5rem;'>
+                            <p style='margin: 0; font-weight: bold;'>{component_name}</p>
+                            <div style='display: flex; align-items: center; margin-top: 0.5rem;'>
+                                <div style='flex-grow: 1; height: 8px; background-color: #f0f0f0; border-radius: 4px; margin-right: 10px;'>
+                                    <div style='width: {(score/25)*100}%; height: 100%; background-color: {component_color}; border-radius: 4px;'></div>
+                                </div>
+                                <span style='color: {component_color}; font-weight: bold;'>{score:.1f}/25</span>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-                # Health recommendations
+                # Health recommendations with modern styling
                 if health_score < 60:
-                    st.warning("⚠️ Your financial health needs attention. Consider the recommendations above.")
+                    st.markdown("""
+                    <div style='background-color: #FFEBEE; padding: 1rem; border-radius: 10px; border-left: 5px solid #FF6B6B; margin-top: 1.5rem;'>
+                        <h4 style='color: #FF6B6B; margin-top: 0;'>⚠️ Action Required</h4>
+                        <p>Your financial health needs attention. Consider the recommendations in the previous tab to improve your score.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 elif health_score < 80:
-                    st.info("💡 Good financial health! A few improvements could boost your score.")
+                    st.markdown("""
+                    <div style='background-color: #FFF8E1; padding: 1rem; border-radius: 10px; border-left: 5px solid #FFB347; margin-top: 1.5rem;'>
+                        <h4 style='color: #FFB347; margin-top: 0;'>💡 Good Progress</h4>
+                        <p>Your financial health is good! A few improvements could boost your score even further.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 else:
-                    st.success("🎉 Excellent financial health! You're doing great!")
+                    st.markdown("""
+                    <div style='background-color: #E8F5E9; padding: 1rem; border-radius: 10px; border-left: 5px solid #4CAF50; margin-top: 1.5rem;'>
+                        <h4 style='color: #4CAF50; margin-top: 0;'>🎉 Excellent!</h4>
+                        <p>Your financial health is excellent! You're doing great with your money management.</p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             with tab4:
                 st.markdown("### 🔍 Detailed Financial Analysis")
@@ -1754,6 +2720,9 @@ def main():
                     """)
 
             with tab7:
+                financial_budget_tracker()
+
+            with tab8:
                 ai_financial_assistant()
 
         except Exception as e:
@@ -1807,6 +2776,24 @@ st.markdown("""
         padding: 20px;
         margin-top: 20px;
         border-left: 4px solid #4e89e9;
+    }
+
+    .budget-card {
+        background-color: #e6f7ff;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
+        border-left: 4px solid #1890ff;
+    }
+
+    .positive-budget {
+        color: #52c41a;
+        font-weight: bold;
+    }
+
+    .negative-budget {
+        color: #f5222d;
+        font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
